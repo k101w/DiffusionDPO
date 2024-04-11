@@ -48,13 +48,17 @@ from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNe
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, deprecate, is_wandb_available, make_image_grid
 from diffusers.utils.import_utils import is_xformers_available
-
+import pdb
 
 if is_wandb_available():
     import wandb
 
-    
-    
+import os
+os.environ['HUGGINGFACE_HUB_CACHE'] = '/data3/kewenwu/DiffusionDPO/huggingface/hub' 
+os.environ['HF_HOME'] = '/data3/kewenwu/DiffusionDPO/huggingface'
+os.environ['XDG_CACHE_HOME'] = '/data3/kewenwu/DiffusionDPO/' 
+
+ 
 ## SDXL
 import functools
 import gc
@@ -686,29 +690,31 @@ def main():
         
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
-    if args.dataset_name is not None:
-        # Downloading and loading a dataset from the hub.
-        dataset = load_dataset(
-            args.dataset_name,
-            args.dataset_config_name,
-            cache_dir=args.cache_dir,
-            data_dir=args.train_data_dir,
-        )
-    else:
-        data_files = {}
-        if args.train_data_dir is not None:
-            data_files[args.split] = os.path.join(args.train_data_dir, "**")
-        dataset = load_dataset(
-            "imagefolder",
-            data_files=data_files,
-            cache_dir=args.cache_dir,
-        )
+    #TODO:
+    dataset = datasets.load_from_disk("/data3/kewenwu/dpo_datasets")
+    # if args.dataset_name is not None:
+    #     # Downloading and loading a dataset from the hub.
+    #     dataset = load_dataset(
+    #         args.dataset_name,
+    #         args.dataset_config_name,
+    #         cache_dir=args.cache_dir,
+    #         data_dir=args.train_data_dir,
+    #     )
+    # else:
+    #     data_files = {}
+    #     if args.train_data_dir is not None:
+    #         data_files[args.split] = os.path.join(args.train_data_dir, "**")
+    #     dataset = load_dataset(
+    #         "imagefolder",
+    #         data_files=data_files,
+    #         cache_dir=args.cache_dir,
+    #     )
         # See more about loading custom images at
         # https://huggingface.co/docs/datasets/v2.4.0/en/image_load#imagefolder
 
     # Preprocessing the datasets.
     # We need to tokenize inputs and targets.
-    column_names = dataset[args.split].column_names
+    column_names = dataset.column_names
 
     # 6. Get the column names for input/target.
     dataset_columns = DATASET_NAME_MAPPING.get(args.dataset_name, None)
@@ -827,13 +833,15 @@ def main():
                 return do_flip(batch['jpg_0'][0], batch['jpg_1'][0], batch['caption'][0])
     elif args.train_method == 'sft':
         def preprocess_train(examples):
-            if 'pickapic' in args.dataset_name:
+            if 'GenAI' in args.dataset_name:
                 images = []
                 # Probably cleaner way to do this iteration
                 for im_0_bytes, im_1_bytes, label_0 in zip(examples['jpg_0'], examples['jpg_1'], examples['label_0']):
                     assert label_0 in (0, 1)
                     im_bytes = im_0_bytes if label_0==1 else im_1_bytes
                     images.append(Image.open(io.BytesIO(im_bytes)).convert("RGB"))
+                print(images[0].shape)
+                exit()
             else:
                 images = [image.convert("RGB") for image in examples[image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
@@ -875,7 +883,7 @@ def main():
         if args.max_train_samples is not None:
             dataset[args.split] = dataset[args.split].shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
-        train_dataset = dataset[args.split].with_transform(preprocess_train)
+        train_dataset = dataset.with_transform(preprocess_train)
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
@@ -887,7 +895,6 @@ def main():
         drop_last=True
     )
     ##### END BIG OLD DATASET BLOCK #####
-    
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
